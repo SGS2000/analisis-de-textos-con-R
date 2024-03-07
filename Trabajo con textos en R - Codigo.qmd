@@ -1,0 +1,583 @@
+---
+title: "Trabajo con textos en R"
+author: "Santiago García Sánchez"
+format: 
+  html:
+    code-fold: show
+    code-tools: true
+    code-link: true
+    df-print: paged
+    toc: true
+    toc-location: left
+    theme: litera
+editor: visual
+lang: es
+self-contained: true
+execute: 
+  warning: false
+  error: false
+---
+
+```{r, echo = FALSE}
+```
+
+```{css, echo = FALSE}
+.justify {
+  text-align: center !important;
+  font-size: 14px;
+}
+```
+
+## Librerías
+
+Se cargan todas las librerías necesarias:
+
+```{r}
+#| message: false
+#Trabajo con textos
+library(pdftools) #Importar PDFs
+library(tidytext) #Varias funciones
+library(corpus) #Tokenizacion / Lematización
+library(stopwords) #Palabras vacías
+library(quanteda) #Matrices
+
+#Gráficos
+library(ggwordcloud) #Nubes
+library(igraph) #Diagramas de red
+library(ggraph) #Diagramas de red
+
+#Varios
+library(tidyverse) 
+```
+
+## Importar archivos PDF
+
+Para importar un archivo con extensión .pdf, se puede recurrir a la función *pdf_text()* del paquete **pdftools**. El objeto resultante es del tipo *character*, con una longitud equivalente al numero de páginas del archivo original.
+
+En el siguiente ejemplo, se importa un archivo y se muestran sus primeras dos páginas:
+
+```{r}
+#Importar un archivo
+pdf_importado <- pdftools::pdf_text("2001_una_odisea_espacial.pdf")
+
+head(pdf_importado, n = 2) #Dos primeras páginas
+```
+
+### Importar múltiples archivos
+
+Para evitar cargar cada archivo por separado, se puede crear una función como la que se muestra a continuación, la cual busca todos los elementos con extensión .pdf en una ruta y los importa al programa:
+
+```{r, warning = F, error=F}
+#| warning: false
+#| error: false
+
+#Importar todos los archivos de una carpeta
+
+  #Función nueva
+importar_pdf <- function(ruta){
+  setwd(ruta)
+  pdf_archivos <- list.files(pattern = "pdf$") #Busca todos los archivos .pdf
+  lista <- lapply(pdf_archivos, pdf_text)
+  names(lista) <- pdf_archivos #Les asigna su nombre respectivo
+  return(lista)
+}
+
+  #Ejemplo
+pdfs_importados <- importar_pdf("Mis PDF")
+
+summary(pdfs_importados)
+```
+
+## Preprocesamiento de los datos
+
+Antes de poder trabajar con la información provista por los documentos, generalmente se deberá realizar una serie de tareas para limpiar los textos y darles un formato apropiado.
+
+Para mostrar cómo llevar estos procesos a la práctica, se utilizará a modo de ejemplo el siguiente texto:
+
+::: justify
+Cuando el que viaja por el norte de la región central de Massachusetts se equivoca de dirección al llegar al cruce de la carretera de Aylesbury nada más pasar Dean's Corners, verá que se adentra en una extraña y apenas poblada comarca. El terreno se hace más escarpado y las paredes de piedra cubiertas de maleza van encajonando cada vez más el sinuoso camino de tierra. Los árboles de los bosques son allí de unas dimensiones excesivamente grandes, y la maleza, las zarzas y la hierba alcanzan una frondosidad rara vez vista en las regioneshabitadas.
+
+Autor: H.P. Lovecraft
+:::
+
+### Limpieza inicial
+
+Mediante la función *gsub()* se pueden eliminar cadenas de texto no deseadas. También es posible corregir algunos errores que puedan aparecer al importar los archivos pdf.
+
+```{r}
+texto_prueba <- "
+Cuando el que viaja por el norte de la región central de Massachusetts 
+se equivoca de dirección al llegar al cruce de la carretera 
+de Aylesbury nada más pasar Dean's Corners, verá que se adentra 
+en una extraña y apenas poblada comarca. El terreno se hace más 
+escarpado y las paredes de piedra cubiertas de maleza van 
+encajonando cada vez más el sinuoso camino de tierra. Los árboles 
+de los bosques son allí de unas dimensiones excesivamente 
+grandes, y la maleza, las zarzas y la hierba alcanzan una 
+frondosidad rara vez vista en las regioneshabitadas. 
+\n
+Autor: H.P. Lovecraft 
+"
+
+texto_prueba <- texto_prueba %>%
+  gsub("Autor: H.P. Lovecraft","",.) %>%
+  gsub("\n","",.) %>%
+  gsub("regioneshabitadas","regiones habitadas",.)
+
+texto_prueba
+```
+
+### Tokenización
+
+A continuación, se lleva a cabo el proceso conocido como *tokenización* o segmentación. Los textos deben ser divididos en unidades (tókenes).
+
+Una alternativa para realizar esta tarea es la función *text_tokens()* del paquete **corpus**. Esta función toma un objeto (o lista de objetos) del tipo *character* y devuelve una lista (o lista de listas) con sus palabras por separado. Además, todo el texto es automáticamente transformado a minúsculas:
+
+```{r}
+corpus::text_tokens(texto_prueba)
+```
+
+Otra alternativa es la función *unnest_tokens()* del paquete **tidytext**. Esta función toma un objeto de clase *tibble* y devuelve otro en el que cada fila corresponde a una palabra.
+
+```{r}
+tibble(texto_prueba) %>% #Convertir a objeto tibble
+    tidytext::unnest_tokens(output = palabra, input = texto_prueba)
+```
+
+### Lematización y *stemming*
+
+Un paso opcional consiste en aplicar un algoritmo de lexematización o de lematización, con el objetivo de transformar todas las variante de una palabra a una único elemento "base".
+
+#### Stemming / lexematización
+
+La función *text_tokens()* posee un una opción incorporada para realizar *stemming*, utilizando los algoritmos de un lenguaje de programación llamado [*Snowball*](https://snowballstem.org/).
+
+```{r}
+corpus::text_tokens(texto_prueba, stemmer = "es")%>%
+  as.data.frame(col.names ="palabra") #Se pasa a data frame para mejor visualización
+```
+
+Una alternativa más compleja es recurrir a modelos ya entrenados, mediante el paquete [UDPipe](https://bnosac.github.io/udpipe/en/). En [este enlace](https://cran.r-project.org/web/packages/udpipe/vignettes/udpipe-annotation.html) se presenta una guía para ello.
+
+#### Lematización
+
+La función *text_tokens()* mostrada anteriormente también permite utilizar una función personalizada para realizar *stemming* o lematización. De esta manera, es posible recurrir a un diccionario de lemas. Los autores del paquete *corpus* [recomiendan](https://corpustext.com/articles/stemmer.html) los diccionarios creados por Michal Měchura, disponibles para su descarga en [GitHub](https://github.com/michmech/lemmatization-lists).
+
+Estos diccionarios consisten en dos columnas: la primera contiene los lemas (por ejemplo: "amigo") y la segunda todos los términos derivados de éstos ("amiga", "amigos", "amigas"). Al tener un formato .txt, es fácil editarlos y añadir o quitar palabras.
+
+```{r, warning = F, error=F, message = FALSE}
+#Se importa un diccionario (descargado de GitHub)
+lematizacion <- read_table2("lemmatization-es.txt"
+                            #Si no se ven correctamente los textos, usar esta opción:
+                            #, locale = locale(encoding = "ISO-8859-1")
+                            )
+                            
+
+#Se crea una función personalizada (ver documentación del paquete Corpus)
+names(lematizacion) <- c("stem", "term")
+
+stem_list <- function(term) {
+  i <- match(term, lematizacion$term)
+  if (is.na(i)) {
+    stem <- term
+  } else {
+    stem <- lematizacion$stem[[i]]
+  }
+  stem}
+
+#Se aplica al texto
+text_tokens(texto_prueba, stemmer = stem_list)%>%
+  as.data.frame(col.names ="palabra") #Se pasa a data frame para mejor visualización
+```
+
+### Palabras vacías
+
+El paquete **stopwords** ofrece distintas listas de palabras vacías, en varios idiomas:
+
+```{r}
+stopwords::stopwords_getsources()
+```
+
+Para visualizar las palabras, se usa la función *get_stopwords()* del paquete **tidytext** (se necesita también el paquete **stopwords**). En este ejemplo se recurre a la lista *Stopwords ISO*, que contiene más de 700 palabras frecuentes en español.
+
+```{r}
+tidytext::get_stopwords(language = "es", source = "stopwords-iso")
+```
+
+Es posible combinar varias listas de palabras o crear una lista personalizada añadiendo palabras propias:
+
+```{r}
+lista_stopwords <- c(get_stopwords(language = "es", source = "stopwords-iso")$word, "vos", "sos", "hacés") #Se añaden 3 palabras
+
+lista_stopwords %>%
+  as.data.frame(col.names = "palabra")
+```
+
+Para eliminar estas palabras de los documentos, se usa la función *filter()* del paquete **dplyr** (importado como parte del *tidyverse*).
+
+```{r}
+corpus::text_tokens(texto_prueba) %>%
+  as.data.frame(col.names = "palabra") %>% #Se convierte a data frame para poder filtrar
+  dplyr::filter(!palabra %in% lista_stopwords) #Se mantienen las palabras que NO estén en "lista_stopwords"
+```
+
+### Otra limpieza
+
+La función *filter()* también puede utilizarse para eliminar otros elementos no deseados de los textos, como caracteres de alfabetos distintos, números y signos de puntuación. Utilizando la función *grepl()* se evalúa si una fila cumple una determinada condición, para luego eliminar aquellas que devuelvan el valor FALSE. A continuación se muestra un ejemplo.
+
+```{r}
+texto_sin_limpiar <- "123, esto es un texto normal, このテキストは日本語です. "
+texto_sin_limpiar
+```
+
+```{r, warning=FALSE}
+texto_limpio <- corpus::text_tokens(texto_sin_limpiar) %>%
+  as.data.frame(col.names ="palabra")  %>%
+  filter(!palabra %in% lista_stopwords,
+         grepl(pattern = "[\U0020-\U007F\U00A0-\U00FF]",palabra), #Se mantiene solo el alfabeto latino
+            ##Ver https://jrgraphix.net/r/Unicode/ para más detalles
+         nchar(palabra) >= 2, #Se mantiene solo palabras de más de dos caracteres (elimina signos de puntuación)
+         !grepl(pattern = "[0-9]",palabra) #Se mantienen las palabras que NO sean números
+         )
+
+texto_limpio
+```
+
+## Calcular estadísticas
+
+Ahora se presentan dos maneras distintas de sintetizar la información provista por los textos: la frecuencia de términos y la estadística TF-IDF.
+
+### Frecuencia de términos (TF)
+
+Antes de calcular las estadísticas, se crea una función para realizar el preprocesamiento.
+
+```{r}
+obtener_palabras <- function(texto, titulo){
+  tibble(texto) %>%
+  tidytext::unnest_tokens(output = palabra, input = texto) %>%
+  dplyr::filter(!palabra %in% lista_stopwords,
+         nchar(palabra) > 2,
+         !grepl(pattern = "[0-9]",palabra)
+         ) %>%
+  mutate(titulo = titulo)
+}
+```
+
+Para obtener la frecuencia de términos, se puede recurrir a la función *count()* del paquete **dplyr()**. Esta función también ordena las palabras de más a menos frecuente, si se especifica la opción *sort*.
+
+```{r}
+palabras_pdf <- obtener_palabras(pdf_importado, "2001: Una odisea Espacial")
+
+palabras_pdf %>%
+  dplyr::count(palabra, sort = TRUE) 
+```
+
+### TF-IDF
+
+La función *bind_tf_idf()* del paquete **tidytext** permite calcular la estadística TF-IDF. Para esto se requiere que el conjunto de datos tenga tres columnas:
+
+-   Una columna con un término por fila ("*palabra*" en este ejemplo).
+
+-   Una columna que indique a qué documento pertenece cada término ("*título*").
+
+-   Una columna con la frecuencia absoluta de cada término ("*n*").
+
+La función añade tres columnas al conjunto de datos:
+
+-   **tf**: A pesar del nombre, en realidad es la frecuencia relativa del término en el documento y no la frecuencia absoluta.
+
+-   **idf**: El valor de IDF de cada término, siendo 0 si éste aparece en todos los documentos.
+
+-   **tf-idf**: El valor de TF-IDF de cada término (producto de las dos columnas anteriores).
+
+```{r}
+#Se le aplica la función "obtener_palabras" a cada pdf y se los guarda en un único objeto
+palabras_pdfs = c()
+for (texto in 1:length(pdfs_importados)) {
+  palabras_pdfs <- dplyr::bind_rows(palabras_pdfs, obtener_palabras(pdfs_importados[[texto]], names(pdfs_importados[texto])) )
+}
+
+#Se calcula TF-IDF
+palabras_pdfs_tfidf = palabras_pdfs %>%
+  group_by(titulo) %>% #Se agrupa por archivo
+  count(palabra) %>%
+  tidytext::bind_tf_idf(palabra, titulo, n) %>% #Se calcula TF-IDF
+  arrange(desc(tf_idf)) #Se ordena de mayor a menor valor de TF-IDF
+  
+palabras_pdfs_tfidf
+```
+
+### Gráficos
+
+Una forma habitual de graficar las palabras más frecuentes de un texto es mediante una nube de palabras. Esto se puede hacer mediante los paquetes **ggplot2** y **ggwordcloud**:
+
+```{r}
+palabras_pdf %>%
+  count(palabra) %>%
+  filter(n >= 50) %>%
+  ggplot() +
+    aes(label = palabra, #Texto a mostrar
+        size = n, #El tamaño es dado por la frecuencia absoluta
+        color = n) + #La intensidad del color es dada por la frecuencia absoluta
+    ggwordcloud::geom_text_wordcloud(eccentricity = 1) + #Forma de la nube
+    scale_size_area(max_size = 15) + #Tamaño del texto
+    scale_color_gradient(low = "#bdd7e7", #Color para la menor frecuencia
+                         high = "#08519c") + #Color para la mayor frecuencia
+    theme_minimal()
+```
+
+También se puede hacer que el tamaño de las palabras y la intensidad de su color correspondan a medidas distintas. Por ejemplo, el tamaño puede corresponder al valor TF-IDF mientras que la intensidad del color indica la frecuencia de términos:
+
+```{r}
+palabras_pdfs_tfidf %>%
+  filter(titulo == "El color que cayo del cielo.pdf", #Se selecciona un libro específico
+         tf_idf > 0,
+         n >= 9) %>%
+  ggplot() +
+    aes(label = palabra,
+        size = tf_idf, #El tamaño es dado por el valor TF-IDF
+        color = n) + #La intensidad del color es dada por la frecuencia absoluta
+    geom_text_wordcloud(eccentricity = 1) +
+    scale_size_area(max_size = 22) + 
+    scale_color_gradient(low = "#fdbe85",
+                         high = "#a63603") +
+    theme_minimal()
+```
+
+Otra alternativa que se utiliza a menudo es un gráfico de dispersión, donde el eje horizontal corresponde a las palabras y el eje vertical a su frecuencia. Se añaden etiquetas a los puntos con la función *geomtext()* de **ggplot2**.
+
+```{r}
+palabras_pdf %>%
+  count(palabra, sort = T) %>%
+  filter(n >= 90) %>%
+  ggplot(
+    aes(x= reorder(palabra,-n), 
+      y=n)
+      ) +
+  geom_text(aes(size=n, #Se grafican las palabras
+                label=palabra, 
+                angle=30,
+                color=-n),  
+            hjust=-.1,
+            show.legend = F) + 
+  scale_size_continuous(range=c(5,8)) + #Tamaños de las palabras
+  scale_fill_gradient(low = "#bdd7e7",high = "#08519c") +
+  geom_point(aes(color=-n)) + #Se añaden los puntos
+  ylim(c(90, 220)) +
+  labs(x = "Palabra", y = "Frecuencia") +
+  theme_minimal() + 
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x= element_blank(), 
+        legend.position='none')
+```
+
+Finalmente, se pueden utilizar gráficos más tradicionales, como por ejemplo un gráfico de barras:
+
+```{r}
+palabras_pdf %>%
+  count(palabra, sort = T) %>%
+  filter(n >= 90) %>%
+  ggplot(
+    aes(x= reorder(palabra,-n), 
+      y=n)
+      ) +
+  geom_bar(stat="identity", aes(fill=n)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_gradient(low = "#bdd7e7",high = "#08519c") +
+  labs(x="Palabra", y="Frecuencia") +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.ticks.x= element_blank())
+```
+
+## N-gramas
+
+Trabajar con n-gramas es muy similar a trabajar con palabras individuales (unigramas). En esta sección, se verán ejemplos para n-gramas con $n=2$ (bigramas), pero todo lo visto puede ser generalizado para n-gramas de mayores dimensiones.
+
+### Construcción
+
+La función *unnest_tokens()* permite también obtener los bigramas de un texto, especificando las opciones *token = "ngrams"* y *n = 2*. Este último argumento permite también construir n-gramas con n \> 2 (por ejemplo, al especificar *n = 3* se obtendrían trigramas).
+
+```{r}
+tibble(pdf_importado) %>%
+  tidytext::unnest_tokens(output = bigrama, input = pdf_importado, token = "ngrams", n = 2) 
+```
+
+Para realizar el preprocesamiento visto anteriormente para palabras individuales, puede recurrirse a las funciones *separate()* y *unite()* del paquete **tidyr**, como se ve en el siguiente ejemplo:
+
+```{r}
+bigramas_pdf <- tibble(pdf_importado) %>%
+  tidytext::unnest_tokens(output = bigrama, 
+                          input = pdf_importado, 
+                          token = "ngrams", 
+                          n = 2) %>%
+  tidyr::separate(bigrama, c("palabra1", "palabra2"), sep = " ") %>% #Se separa el bigrama en palabras individuales
+    filter(nchar(palabra1) > 2,
+           nchar(palabra2) > 2,
+           !palabra1 %in% lista_stopwords,
+           !palabra2 %in% lista_stopwords,
+           !grepl(pattern = "[0-9]",palabra1),
+           !grepl(pattern = "[0-9]",palabra2)
+           ) %>%
+  tidyr::unite(bigrama, palabra1,palabra2, sep = " ") #Se vuelve a unir el bigrama
+
+bigramas_pdf
+```
+
+### Estadísticas
+
+Las mismas medidas que se calcularon para los unigramas son válidas para bigramas. Para obtener la frecuencia de términos, se utiliza nuevamente la función *count().*
+
+```{r}
+bigramas_pdf %>%
+  count(bigrama, sort=T)
+```
+
+Del mismo modo, se vuelve a recurrir a *bind_tf_idf()* para calcular el valor TF-IDF de cada bigrama.
+
+```{r}
+#Se define una función para obtener los bigramas
+obtener_bigramas <- function(texto, titulo){
+  tibble(texto) %>%
+    tidytext::unnest_tokens(output = bigrama, input = texto, token = "ngrams", n = 2) %>%
+    separate(bigrama, c("palabra1", "palabra2"), sep = " ") %>% 
+    filter(nchar(palabra1) > 2,
+           nchar(palabra2) > 2,
+           !palabra1 %in% lista_stopwords,
+           !palabra2 %in% lista_stopwords,
+           !grepl(pattern = "[0-9]",palabra1),
+           !grepl(pattern = "[0-9]",palabra2)
+           ) %>%
+  unite(bigrama, palabra1,palabra2, sep = " ") %>%
+  mutate(titulo = titulo)
+}
+
+
+#Se obtienen los bigramas de los textos importados
+bigramas_pdfs = c()
+for (texto in 1:length(pdfs_importados)) {
+  bigramas_pdfs <- dplyr::bind_rows(bigramas_pdfs, obtener_bigramas(pdfs_importados[[texto]], names(pdfs_importados[texto])) )
+}
+
+#Se calcula la estadística TF-IDF
+bigramas_pdfs_tfidf = bigramas_pdfs %>%
+  group_by(titulo) %>% #Se agrupa por archivo
+  count(bigrama) %>%
+  tidytext::bind_tf_idf(bigrama, titulo, n) %>% #Se calcula TF-IDF
+  arrange(desc(tf_idf)) #Se ordena de mayor a menor TF-IDF
+  
+bigramas_pdfs_tfidf
+```
+
+### Gráficos
+
+Una forma de visualizar n-gramas es mediante diagramas de red. En este tipo de gráficos, cada nodo representa a una palabra, las cuáles pueden pertenecer a uno o varios bigramas.
+
+En el siguiente ejemplo, dichos nodos se representan como círculos celestes, los cuales están unidos con flechas que indican el orden de las palabras en el bigrama. Las flechas adquieren una mayor transparencia a medida que el bigrama tiene una menor frecuencia en el texto.
+
+```{r, warning = F, error=F}
+#| warning: false
+#| error: false
+
+bigramas_pdf %>%
+  count(bigrama) %>%
+  filter(n >= 7) %>%
+  separate(bigrama, c("palabra1", "palabra2"), sep = " ") %>%
+  igraph::graph_from_data_frame()  %>% #Crear la red
+  ggraph::ggraph(layout = "fr") + #Graficar
+  geom_edge_link(aes(edge_alpha = n), #Intensidad de la flecha depende de n 
+                 show.legend = FALSE,
+                 arrow = grid::arrow(type = "closed", length = unit(.15, "inches")), #Estilo de las flechas
+                 end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), 
+                 repel = TRUE, 
+                 point.padding = unit(0.1, "lines")) +
+  theme_void()
+```
+
+En lugar de flechas, puede recurrirse simplemente a líneas. En este caso, tanto la intensidad como el grosor de la línea dependen de la frecuencia del bigrama conformado por las dos palabras que ésta une.
+
+```{r}
+bigramas_pdf %>%
+  count(bigrama) %>%
+  filter(n >= 7) %>%
+  separate(bigrama, c("palabra1", "palabra2"), sep = " ") %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n, edge_width = n), #Intensidad y grosor dependen de n
+                 edge_colour = "red") +
+  geom_node_point(size = 3) +
+  geom_node_text(aes(label = name), 
+                 repel = TRUE, 
+                 point.padding = unit(0.1, "lines")) +
+  theme_void() +
+  theme(text = element_text(size = 10))
+```
+
+Una vez más, también es posible recurrir a gráficos más simples para visualizar las frecuencias de los n-gramas:
+
+```{r}
+bigramas_pdf %>%
+  count(bigrama, sort = T) %>%
+  filter(n >= 13) %>%
+  ggplot(
+    aes(x = reorder(bigrama,n), 
+      y = n)
+      ) +
+  geom_bar(stat="identity", aes(fill = n)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_gradient(low = "#bdd7e7",high = "#08519c") +
+  labs(x = "Bigrama", y = "Frecuencia") +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.ticks.y= element_blank()) +
+  coord_flip()
+```
+
+## Matrices DTM
+
+En distintos contextos, puede ser necesario que los datos se presenten en el formato de una matriz de documentos-término (DTM). En este tipo de matrices, cada fila corresponde a un documento, mientras que cada columna corresponde a una palabra o n-grama. En cada celda, se suele colocar la frecuencia de dicha palabra o bigrama en el documento respectivo.
+
+Hay múltiples paquetes que permiten trabajar con este formato, entre ellos **tm** y **quanteda**. En el siguiente ejemplo, se recurre a la función *cast_dfm()* para transformar un conjunto de datos en un objeto *dfm* del paquete **quanteda**.
+
+```{r}
+matriz_palabras <- palabras_pdfs %>%
+  group_by(titulo) %>%
+  count(palabra) %>%
+  arrange(palabra) %>%
+  tidytext::cast_dfm(document=titulo, term=palabra, value=n)
+
+head(matriz_palabras)
+```
+
+En lugar de la frecuencia de términos, en cada celda de la matriz puede utilizarse el valor TF-IDF:
+
+```{r}
+matriz_palabras_tfidf <- palabras_pdfs_tfidf %>%
+  arrange(palabra) %>%
+  tidytext::cast_dfm(document=titulo, term=palabra, value=tf_idf)
+
+head(matriz_palabras_tfidf)
+```
+
+Si, por el contrario, se cuenta con una matriz DTM y se desea transformarla a un formato largo, se puede utilizar la función *tidy()*.
+
+```{r}
+tidytext::tidy(matriz_palabras)
+```
+
+## Herramientas útiles
+
+-   [**iLovePDF**](https://www.ilovepdf.com/): Página gratuita que ofrece múltiples herramientas online para trabajar con archivos PDF (combinar archivos, eliminar o cambiar el orden de las páginas, etc.).
+-   [**Sejda**](https://www.sejda.com/): Similar al sitio anterior, contiene más funciones pero algunas son pagas.
+-   [**Convertio**](https://convertio.co/es/document-converter/): Página que permite convertir entre distintos formatos de texto.
+-   [**PDF Studio**](https://www.qoppa.com/pdfstudio/): Programa pago para Windows, Mac o Linux con varias utilidades, entre ellas la posibilidad de realizar procesamiento por lotes (editar múltiples archivos a la vez).
+-   [**Convert EPUB to PDF**](https://convert-epub-to-pdf.softonic.com/?ex=RAMP-1097.1): Programa gratuito para Windows. Es útil para transformar múltiples archivos EPUB a formato PDF al mismo tiempo.
+
+## Fuentes de información
+
+-   [*Text mining with R: A tidy approach*](https://www.tidytextmining.com/) de Julia Silge y David Robinson (2017)
+-   [*Supervised Machine Learning for Text Analysis in R*](https://smltar.com/) de Emil Hvitfeldt y Julia Silge (2022)
+-   [*Curso de Procesamiento del Lenguage Natural*](https://rpubs.com/hugoporras/) de Hugo Porras (2020)
+-   [*An Introduction to Text Processing and Analysis with R*](https://m-clark.github.io/text-analysis-with-R/) de Michael Clark (2018)
